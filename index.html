@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>메모장</title>
+<style>*{box-sizing:border-box}body{margin:24px auto;padding:0 16px;max-width:600px;font:16px system-ui;background:white;color:#222}section,li{border:1px solid #ddd;border-radius:8px;padding:16px;margin:12px 0}input,textarea,button{font:inherit;padding:10px;max-width:100%}input,textarea{width:100%;margin:6px 0 12px}button{cursor:pointer;margin-right:6px}button:disabled{cursor:wait;opacity:.6}ul{list-style:none;padding:0}p{white-space:pre-wrap;overflow-wrap:anywhere}[hidden]{display:none!important}#status{min-height:24px}</style>
+<h1>메모장</h1><p id="status" role="status" aria-live="polite"></p>
+<section id="auth"><form id="loginForm"><label for="email">이메일</label><input id="email" type="email" autocomplete="username" required><label for="password">비밀번호</label><input id="password" type="password" minlength="6" autocomplete="current-password" required><button>로그인</button><button id="signup" type="button">회원가입</button></form></section>
+<section id="app" hidden><button id="logout">로그아웃</button><form id="memoForm"><label for="content">메모 내용</label><textarea id="content" rows="5" required></textarea><button id="save">저장</button></form><ul id="list"></ul></section>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+let db,user=null,generation=0;
+const status=text=>$('status').textContent=text;
+function fail(e){status('오류: '+(e.message||'다시 시도해 주세요.'))}
+async function busy(fn,text){document.querySelectorAll('button').forEach(b=>b.disabled=true);status(text);try{await fn()}catch(e){fail(e)}finally{document.querySelectorAll('button').forEach(b=>b.disabled=false)}}
+async function list(){
+ const version=++generation, uid=user?.id;if(!uid)return;
+ const {data,error}=await db.from('memos').select('id,content,created_at').eq('user_id',uid).order('created_at',{ascending:false});
+ if(version!==generation||user?.id!==uid)return;if(error)throw error;
+ $('list').replaceChildren();
+ for(const memo of data){const li=document.createElement('li'),p=document.createElement('p'),b=document.createElement('button');p.textContent=memo.content;b.textContent='삭제';b.onclick=()=>busy(async()=>{const {error}=await db.from('memos').delete().eq('id',memo.id).eq('user_id',user.id);if(error)throw error;await list();status('삭제했습니다.')},'삭제 중…');li.append(p,b);$('list').append(li)}
+ if(!data.length){const li=document.createElement('li');li.textContent='메모가 없습니다.';$('list').append(li)}
+}
+async function render(session){user=session?.user||null;generation++;$('auth').hidden=!!user;$('app').hidden=!user;$('list').replaceChildren();if(user)await list()}
+$('loginForm').onsubmit=e=>{e.preventDefault();authenticate(false)};
+$('signup').onclick=()=>{if($('loginForm').reportValidity())authenticate(true)};
+function authenticate(signup){busy(async()=>{const credentials={email:$('email').value.trim(),password:$('password').value};const {data,error}=signup?await db.auth.signUp(credentials):await db.auth.signInWithPassword(credentials);if(error)throw error;$('password').value='';await render(data.session);status(data.session?(signup?'가입하고 로그인했습니다.':'로그인했습니다.'):'이메일 확인 설정을 확인해 주세요.')},'처리 중…')}
+$('memoForm').onsubmit=e=>{e.preventDefault();busy(async()=>{const content=$('content').value.trim();if(!content)throw new Error('메모 내용을 입력해 주세요.');const {error}=await db.from('memos').insert({user_id:user.id,content});if(error)throw error;$('content').value='';await list();status('저장했습니다.')},'저장 중…')};
+$('logout').onclick=()=>busy(async()=>{const {error}=await db.auth.signOut();if(error)throw error;$('content').value='';await render(null);status('로그아웃했습니다.')},'처리 중…');
+(async()=>{try{db=supabase.createClient('https://stcgyjgtzlxdinbsrxxr.supabase.co','sb_publishable_3__GGiMv4eUZ9Ss4M-Ja7Q_08PSKkt1',{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});db.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT')render(null);else if(event==='SIGNED_IN'&&session?.user.id!==user?.id)setTimeout(()=>render(session).catch(fail),0)});const {data,error}=await db.auth.getSession();if(error)throw error;await render(data.session)}catch(e){fail(e)}})();
+</script></html>
